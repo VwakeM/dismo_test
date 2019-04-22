@@ -1,42 +1,63 @@
-install.packages(c('raster', 'rgdal', 'dismo', 'rJava'))
-
 library(dismo)
 library(maptools)
 library(ggplot2)
 library(tidyverse)
 
-#file = paste(system.file(package="dismo"), "/ex/bradypus.csv", sep="")
-#bradypus <- read.table(file,  header=TRUE,  sep=",")
-#head(bradypus)
-
 ele_max = gbif("elephas", "maximus*", geo=TRUE)
 ele_loc = select(ele_max, lat, lon)
-
-#ras = raster(ele_max)
+ele_valid <- ele_loc%>% na.omit() 
 
 data(wrld_simpl)
 plot(wrld_simpl, xlim=c(110,120), ylim=c(-10,80), axes=TRUE, col="light yellow")
-
 box()
-# add the points
-points(ele_max$lon, ele_max$lat, col='orange', pch=20, cex=0.75)
-# plot points again to add a border, for better visibility 
-points(ele_max$lon, ele_max$lat, col='red', cex=0.75)
 
-#duplicated(ele_max$lon)
+points(ele_valid$lon, ele_valid$lat, col='orange', pch=20, cex=0.75)
+points(ele_valid$lon, ele_valid$lat, col='red', cex=0.75)
 
-# Use land use, elevation, rainfall and create a raster stack
 clim_dat = getData(name = "worldclim", download = TRUE, var = "bio", res = 10)
-ele_ext = extent(-180,100,-90,90)
+ele_ext = extent(0,180, 0, 180)
 clim_crop = crop(clim_dat, ele_ext)
 plot(clim_crop$bio1)
 
-vals = raster::extract(clim_dat, ele_valid)
+presvals = raster::extract(clim_crop, ele_valid)
+presvals <- vals%>% na.omit()
 
-ele_valid <- ele_loc%>% na.omit() 
+plot(clim_dat, 1)
+points(ele_valid$lon, ele_valid$lat, col='orange', pch=20, cex=0.75)
+points(ele_valid$lon, ele_valid$lat, col='red', cex=0.75)
 
-sum(is.na(ele_loc$lon))
+set.seed(0)
+backgr <- randomPoints(clim_crop, 500)
+absvals <- raster::extract(clim_crop, backgr)
+pb <- c(rep(1, nrow(presvals)), rep(0, nrow(absvals)))
 
-class(clim_dat)
-plot(clim_crop, 3)
+sdmdata <- data.frame(cbind(pb, rbind(presvals, absvals)))
+sdmdata[,'biome'] = as.factor(sdmdata[,'biome'])
+head(sdmdata)
 
+pairs(sdmdata[,2:5], cex=0.1)
+
+saveRDS(sdmdata, "sdm.Rds")
+saveRDS(presvals, "pvals.Rds")
+
+pred_nf <- dropLayer(clim_crop, 'biome')
+
+set.seed(0)
+group <- kfold(ele_valid, 5)
+pres_train <- ele_valid[group != 1, ]
+pres_test <- ele_valid[group == 1, ]
+
+set.seed(10)
+backg <- randomPoints(pred_nf, n=1000, extf = 1.25)
+colnames(backg) = c('lon', 'lat')
+group <- kfold(backg, 5)
+backg_train <- backg[group != 1, ]
+backg_test <- backg[group == 1, ]
+
+r <- raster(pred_nf, 1)
+plot(!is.na(r), col=c('white', 'light grey'), legend=FALSE)
+plot(ext, add=TRUE, col='red', lwd=2)
+points(backg_train, pch='-', cex=0.5, col='yellow')
+points(backg_test, pch='-',  cex=0.5, col='black')
+points(pres_train, pch= '+', col='green')
+points(pres_test, pch='+', col='blue')
